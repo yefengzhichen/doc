@@ -7,4 +7,4 @@ git tracks changes
 
 prefers svn
 
-creating a new branch is quick
+creating a new branch is quick and simple
