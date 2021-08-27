@@ -226,7 +226,7 @@ GET testq/_search
 
 #### 聚合操作
 
-max、min、avg等等：
+**max、min、avg等**
 
 ```
 GET testq/_search
@@ -248,7 +248,7 @@ GET testq/_search
   }
 ```
 
-分组操作（分桶）：
+**分组操作**
 
 ```
 GET testq/_search
@@ -283,29 +283,149 @@ GET testq/_search
 
 ## 业务使用实例
 
-
-
 #### 搜索高亮和排序
 
+场景： 按关键词搜索，需要高亮
 
+问题：关键词评分一样时，多次点击搜索，问题顺序会变
+
+<img src="es-pic/highlight.png"> 	
+
+
+
+```
+POST question_b/_search
+{
+  "highlight": {
+    "fields": {
+      "question": {}
+    }
+  }, 
+  "sort": [
+    {
+      "_score": {
+        "order": "desc"
+      }
+    }, {
+      "update_time": {
+        "order": "desc"
+      }
+    }
+  ], 
+  "query": {
+  	"bool": {
+  		"must": [{
+  			"match_phrase": {
+  				"question": {
+  					"query": "商品"
+  				}
+  			}
+  		}, {
+  			"terms": {
+  				"id": ["5f9676ed9cb3f44f1829f463", "5c08d7aded33953ecbbd45a5", "59eb2ab2369f99529e2aaf37", "59eb2ab2369f99529e2aaf54", "59eb2ab2369f99529e2aaf50", "59eb2ab2369f99529e2aaf53", "5f90271ca5dd43298b59c798", "59eb2ab3369f99529e2aafb9", "59eb2ab2369f99529e2aaf4c", "59eb2ab2369f99529e2aaf4f", "59eb2ab2369f99529e2aaf52", "59eb2ab3369f99529e2aafc1", "59eb2ab2369f99529e2aaf39", "59eb2ab2369f99529e2aaf3b", "59eb2ab2369f99529e2aaf51", "5db2c4249a560700128ac295", "59eb2ab2369f99529e2aaf56", "59eb2ab2369f99529e2aaf3e", "59eb2ab2369f99529e2aaf4e", "5db2c4249a560700128ac292", "59eb2ab2369f99529e2aaf3a", "59eb2ab3369f99529e2aaf91", "5c7fb6472afd1a3a4a71c484", "59eb2ab2369f99529e2aaf44", "59eb2ab2369f99529e2aaf4b", "59eb2ab2369f99529e2aaf45", "59eb2ab2369f99529e2aaf38", "59eb2ab3369f99529e2aafb5", "5df34c242752430018aa8b50", "59eb2ab3369f99529e2aafc4", "59eb2ab2369f99529e2aaf55", "5c3eb7475fca0d7711bdf3e2", "5f8ed169c9bbdce0a913b1ae", "5ba389481a6ab2424ce015b7", "59eb2ab2369f99529e2aaf3f", "5be2cf7676251154bf6cd78d", "5be2cf7676251154bf6cd78c", "59eb2ab2369f99529e2aaf4d", "5bcc687b369f9910638884d0", "5b62ec995e3773504aba4411", "5ddf73870a37b100146f76f1", "5ddf73870a37b100146f76f3", "603706b7563150aae6083908", "5e4e77092dd8ca00181789ab"]
+  			}
+  		}]
+  	}
+  }
+}
+```
+
+返回结果：
+
+```
+      {
+        "_index" : "orig1_question_b",
+        "_type" : "_doc",
+        "_id" : "59eb2ab3369f99529e2aafb5",
+        "_score" : 5.640376,
+        "_source" : {
+          "create_time" : "2017-10-21T11:08:35.503Z",
+          "id" : "59eb2ab3369f99529e2aafb5",
+          "qid" : 251021,
+          "question" : "看中某商品",
+          "subcategory_id" : "59eb2aab1a6ab20c5c1bf256",
+          "update_time" : "2021-02-25T02:08:32.311Z"
+        },
+        "highlight" : {
+          "question" : [
+            "看中某<em>商</em><em>品</em>"
+          ]
+        },
+        "sort" : [
+          5.640376,
+          1614218912311
+        ]
+      }
+```
 
 
 
 #### 字段组合查询
 
+ 场景：商品关联回复页面导出，需要拿到商品所有回复，因为数据太多会超时。
+
 ```
 question_id: id1, conds_md5: cond1
 question_id: id1, conds_md5: cond2
 question_id: id2, conds_md5: cond3
-
-indices.query.bool.max_clause_count：bool查询有最大项目限制，默认为1024，是静态配置，就算增加，也比较慢
-
-新增一个字段：question_md5: id1.cond1, 查询的时候用terms来查询，这是查询最大限制受index.max_terms_count控制，且速度更快。
 ```
 
-1000个左右时：测试环境
+问题数目：最多1000个行业问题+ x个自定义问题
 
+条件数目：精准意图条件、时效条件、售后阶段等条件，多达100+
 
+一个商品的qid 和conds_md5 组合：1k+到1w+
+
+优化前：
+
+```
+POST shop_condition_answer/_search
+{
+  "query": {
+  	"bool": {
+  		"minimum_should_match": "1",  //或者，should中任意满足一个
+    		"should": [
+    		  { 
+    			    "bool": {
+    			     "filter": [{"term": {"question_id": "5907f68b1a6ab2086eecc24d"}}, 
+        					{"term": {"conds_md5": "4f9922bdc95c131342dada07e56aa5b7"}}]}
+    		  },
+    		  {
+              "bool": {
+    			     "filter": [{"term": {"question_id": "5907f7391a6ab2086eecc28c"}}, 
+        					{"term": {"conds_md5": "7f979de66388f1fd173735695218caa9"}}]}
+    		  }
+    		  ]
+  		}
+  	}
+}
+```
+
+- 测试环境：1000个左右时，耗时6s-10s，如果几千个会超过20s，导致失败
+
+- 解决办法：新增一个字段qid_md5，字段值为“question_id.conds_md5”，将或查询优化为terms查询
+- 优化后耗时：几千个回复，只需要0.8s-1s
+
+优化后：
+
+```
+POST shop_condition_answer/_search
+{
+  "query": {
+  	"bool": {
+  	  "filter": { 
+  					"terms": {
+  						"qid_md5": [
+                "5907f68b1a6ab2086eecc24d.4f9922bdc95c131342dada07e56aa5b7", 
+                "5639bf1b89bc4603d5c612d6.09ce0fc5b50de2cd93dc35a895a9fc85", 
+                "5907f7391a6ab2086eecc28c.5e479b954b0c4c0c301958bf5c2e49ab", 
+                "5907f7391a6ab2086eecc28c.7f979de66388f1fd173735695218caa9"]
+  					}
+  	  }
+  	}
+  }
+}
+```
 
 
 
@@ -368,6 +488,68 @@ indices.query.bool.max_clause_count：bool查询有最大项目限制，默认�
 
 
 
+####  嵌套查询
+
+官方介绍：[嵌套Nested](https://www.elastic.co/guide/en/elasticsearch/reference/7.5/nested.html)
+
+商品中心实例mapping语句：
+
+```
+        "relation_props" : {
+          "type" : "nested",
+          "properties" : {
+            "prop_name" : {
+              "type" : "text",
+              "fields" : {
+                "keyword" : {
+                  "type" : "keyword",
+                  "ignore_above" : 256
+                }
+              }
+            },
+            "value" : {
+              "type" : "text",
+              "fields" : {
+                "keyword" : {
+                  "type" : "keyword",
+                  "ignore_above" : 256
+                }
+              }
+            }
+          }
+        },
+```
+
+商品中心实例查询语句：
+
+```
+            "filter": {
+              "nested": {
+                "path": "relation_props",
+                "query": {
+                  "bool": {
+                    "filter": [
+                      {
+                        "term": {
+                          "relation_props.value.keyword": "5e5f40b5174fce0001db3875"
+                        }
+                      },
+                      {
+                        "term": {
+                          "relation_props.prop_name.keyword": "goods_category_id"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+```
+
+
+
+
+
 
 
 ## 集群读写流程
@@ -382,7 +564,9 @@ indices.query.bool.max_clause_count：bool查询有最大项目限制，默认�
 
 #### 写流程
 
- 	<img src="es-pic/write.png" alt="img" style="zoom:150%;" />
+<img src="es-pic/write.png" style="zoom:150%"/>
+
+
 
 1. 客户端向 Node 1 发送插入一条文档
 
@@ -412,7 +596,6 @@ indices.query.bool.max_clause_count：bool查询有最大项目限制，默认�
 3. Node 3 从主分片检索文档，修改后重新写入一条文档，将老文档标记为删除 
 4. 更新文档后，同步到其他副本分片
 5. Node 3返回给Node 1，Node 1返回到客户端
-   
 
 ## 搜索原理
 
@@ -455,3 +638,10 @@ PUT question_b/_settings
 
 <img src="es-pic/flush.png" style="zoom:80%"/>
 
+
+
+## 问题
+
+- es是列存储的，为啥不能更新索引字段类型
+- es底层搜索和聚合是怎么实现的
+- 数据会打平，嵌套是怎么查询的
